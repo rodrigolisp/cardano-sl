@@ -1,4 +1,6 @@
-module Main where
+module BlockGen.Logic
+       ( generateBlocks
+       ) where
 
 import           Universum
 
@@ -10,9 +12,10 @@ import           System.Directory            (doesDirectoryExist)
 import           System.Random               (mkStdGen, randomIO)
 import           System.Wlog                 (WithLogger, usingLoggerName)
 
-import           Pos.AllSecrets              (mkAllSecretsSimple)
-import           Pos.Core                    (gdBootStakeholders, genesisData,
-                                              genesisSecretKeys)
+import           Pos.AllSecrets              (asSecretKeys, mkAllSecretsSimple,
+                                              unInvSecretsMap)
+import           Pos.Core                    (HasConfiguration, gdBootStakeholders,
+                                              genesisData, genesisSecretKeys)
 import           Pos.Crypto                  (SecretKey)
 import           Pos.DB                      (closeNodeDBs, openNodeDBs)
 import           Pos.Generator.Block         (BlockGenParams (..), genBlocks)
@@ -21,17 +24,28 @@ import           Pos.Txp.GenesisUtxo         (genesisUtxo)
 import           Pos.Txp.Toil                (GenesisUtxo (..))
 import           Pos.Util.UserSecret         (peekUserSecret, usPrimKey)
 
-import           Context                     (initTBlockGenMode)
-import           Error                       (TBlockGenError (..))
-import           Options                     (BlockGenOptions (..), getBlockGenOptions)
+import           BlockGen.Context            (initTBlockGenMode)
+import           BlockGen.Error              (TBlockGenError (..))
+import           Command.Types               (GenBlocksParams (..))
+import           Mode                        (AuxxMode, AuxxSscType)
 
-main :: IO ()
-main = getBlockGenOptions >>= \(BlockGenOptions {..}) ->
+generateBlocks :: HasConfiguration => GenBlocksParams -> AuxxMode ()
+generateBlocks GenBlocksParams{..} = do
   flip catch catchEx $ usingLoggerName "block-gen" $ withConfigurations bgoConfigurationOptions $ do
     seed <- liftIO $ maybe randomIO pure bgoSeed
     putText $ "Generating with seed " <> show seed
 
-    liftIO $ when bgoAppend $ checkExistence bgoPath
+    seed <- maybe (liftIO randomIO) pure bgoSeed
+    let runMode = bool "PROD" "DEV" isDevelopment
+    putText $ "Generating in " <> runMode <> " mode with seed " <> show seed
+
+--    allSecrets <- mkAllSecretsSimple <$> case bgoNodes of
+--        Left bgoNodesN -> do
+--            unless (bgoNodesN > 0) $ throwM NoOneSecrets
+--            pure $ take (fromIntegral bgoNodesN) genesisDevSecretKeys
+--        Right bgoSecretFiles -> do
+--            when (null bgoSecretFiles) $ throwM NoOneSecrets
+--            usingLoggerName "block-gen" $ mapM parseSecret bgoSecretFiles
 
     let addGenesisSecrets
             | bgoUseGenesisSecrets
@@ -49,14 +63,11 @@ main = getBlockGenOptions >>= \(BlockGenOptions {..}) ->
                 { _bgpSecrets         = allSecrets
                 , _bgpGenStakeholders = gdBootStakeholders genesisData
                 , _bgpBlockCount      = fromIntegral bgoBlockN
-                , _bgpTxGenParams     = bgoTxGenParams
+                , _bgpTxGenParams     = def
                 , _bgpInplaceDB       = True
                 , _bgpSkipNoKey       = True
                 }
-    liftIO $ bracket (openNodeDBs (not bgoAppend) bgoPath) closeNodeDBs $ \db ->
-        runProduction $
-        initTBlockGenMode db $
-        void $ evalRandT (genBlocks bgenParams) (mkStdGen seed)
+    evalRandT (genBlocks bgenParams) (mkStdGen seed)
     -- We print it twice because there can be a ton of logs and
     -- you don't notice the first message.
     putText $ "Generated with seed " <> show seed
