@@ -1,4 +1,5 @@
-{-# LANGUAGE RankNTypes #-}
+{-# LANGUAGE AllowAmbiguousTypes #-}
+{-# LANGUAGE RankNTypes          #-}
 
 -- | Blockchain generation logic.
 
@@ -35,6 +36,7 @@ import           Pos.Lrc                     (lrcSingleShot)
 import           Pos.Lrc.Context             (lrcActionOnEpochReason)
 import qualified Pos.Lrc.DB                  as LrcDB
 import           Pos.Ssc.GodTossing          (SscGodTossing)
+import           Pos.Txp                     (MempoolExt)
 import           Pos.Util.Chrono             (OldestFirst (..))
 import           Pos.Util.Util               (maybeThrow, _neHead)
 
@@ -46,7 +48,10 @@ import           Pos.Util.Util               (maybeThrow, _neHead)
 -- valid with respect to the global state right before this function
 -- call.
 genBlocks ::
-       (MonadBlockGen ctx m, RandomGen g)
+       forall g ctx m .
+    ( MonadBlockGen ctx m
+    , RandomGen g
+    )
     => BlockGenParams
     -> RandT g m (OldestFirst [] (Blund SscGodTossing))
 genBlocks params = do
@@ -65,9 +70,12 @@ genBlocks params = do
 -- Generate a valid 'Block' for the given epoch or slot (genesis block
 -- in the former case and main block the latter case) and apply it.
 genBlock ::
-       forall ctx m g. (RandomGen g, MonadBlockGen ctx m)
+       forall ctx m g.
+    ( RandomGen g
+    , MonadBlockGen ctx m
+    )
     => EpochOrSlot
-    -> BlockGenRandMode g m (Maybe (Blund SscGodTossing))
+    -> BlockGenRandMode (MempoolExt m) g m (Maybe (Blund SscGodTossing))
 genBlock eos = do
     let epoch = eos ^. epochIndexL
     unlessM ((epoch ==) <$> lift LrcDB.getEpoch) $
